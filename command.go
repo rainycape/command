@@ -202,6 +202,10 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 		if name == "" {
 			return nil, fmt.Errorf("no name provided for field #%d in type %s", ii, typ)
 		}
+		if value, ok := ptr.(flag.Value); ok {
+			flags.Var(value, name, help)
+			continue
+		}
 		switch field.Type.Kind() {
 		case reflect.Bool:
 			flags.BoolVar(ptr.(*bool), name, fieldVal.Bool(), help)
@@ -218,10 +222,6 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 		case reflect.String:
 			flags.StringVar(ptr.(*string), name, fieldVal.String(), help)
 		default:
-			if value, ok := ptr.(flag.Value); ok {
-				flags.Var(value, name, help)
-				continue
-			}
 			return nil, fmt.Errorf("field %s has invalid option type %s", field.Name, field.Type)
 		}
 	}
