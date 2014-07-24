@@ -191,12 +191,16 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 		field := typ.Field(ii)
 		fieldVal := val.Field(ii)
 		ptr := fieldVal.Addr().Interface()
-		var name, help string
+		name := field.Name
+		var help string
 		if n := field.Tag.Get("name"); n != "" {
 			name = n
 		}
 		if h := field.Tag.Get("help"); h != "" {
 			help = h
+		}
+		if name == "" {
+			return nil, fmt.Errorf("no name provided for field #%d in type %s", ii, typ)
 		}
 		switch field.Type.Kind() {
 		case reflect.Bool:
