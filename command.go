@@ -45,6 +45,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"text/tabwriter"
 )
 
@@ -98,7 +99,7 @@ type Cmd struct {
 	// defined. The current value of the field will be used as the default value
 	// for the flag. Each field might also include two struct tags:
 	//
-	//  - name: The name of the flag. If not present, it will default to the field name.
+	//  - name: The name of the flag. If not present, it will default to the field name in lowercase.
 	//  - help: The short help shown the flag package for the given field.
 	Options interface{}
 }
@@ -191,7 +192,7 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 		field := typ.Field(ii)
 		fieldVal := val.Field(ii)
 		ptr := fieldVal.Addr().Interface()
-		name := field.Name
+		name := strings.ToLower(field.Name)
 		var help string
 		if n := field.Tag.Get("name"); n != "" {
 			name = n
