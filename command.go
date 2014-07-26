@@ -276,7 +276,7 @@ func printHelp(w io.Writer, args []string, commands []*Cmd) error {
 			err = UnknownCommandError(unknown)
 		}
 	}
-	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
+	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
 	for _, v := range commands {
 		fmt.Fprintf(tw, "%s\t%s\n", v.Name, v.Help)
 	}
