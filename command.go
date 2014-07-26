@@ -5,8 +5,8 @@
 // generated, which might be used to list all the available subcommands or
 // to view all the help about a specific subcommand.
 //
-// Clients should just define a list of the command they implement and the call
-// Run or RunArgs directly from main().
+// Clients should just define a list of the command they implement and just call
+// Run or RunOpts directly from main().
 //
 //  package main
 //
@@ -45,12 +45,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 )
 
 var (
 	argsType = reflect.TypeOf([]string(nil))
+	errType  = reflect.TypeOf((*error)(nil)).Elem()
+	cmdType  = reflect.TypeOf((*Cmd)(nil))
 	// ErrNoCommand is returned from Run when no command
 	// has been specified (i.e. there are no arguments).
 	ErrNoCommand = errors.New("no command provided")
@@ -104,12 +107,29 @@ type Cmd struct {
 	Options interface{}
 }
 
-// Run is a shorthand for RunArgs(os.Args[1:], commands).
+// Run is a shorthand for RunOpts(nil, nil, commands).
 func Run(commands []*Cmd) error {
-	return RunArgs(os.Args[1:], commands)
+	return RunOpts(nil, nil, commands)
 }
 
-// RunArgs tries to run a command from the specified list using the
+// Options are used to specify additional options when calling RunOpts
+type Options struct {
+	// Options represents global options which the application
+	// needs to handle before running any commands. If this field
+	// is non-nil and Handler is also non-nil, its first argument
+	// must match the type of this field.
+	Options interface{}
+	// Func must be a function which accepts a value of the same
+	// type of Options as the first parameter and, optionally, a
+	// *Cmd as the second argument, which will be the command which is
+	// going the be run after calling Func.  Note that setting a non-nil
+	// Func with nil Options is supported, but in that case Func must
+	// take zero or one argument of type *Cmd. In any case, Func might return
+	// either zero or one value of type error.
+	Func interface{}
+}
+
+// RunOpts tries to run a command from the specified list using the
 // given arguments, interpreting the first argument as the command name.
 // If the returned error is non-nil, it will be one of:
 //
@@ -119,19 +139,40 @@ func Run(commands []*Cmd) error {
 //  - An UnknownCommandError when the command (the first argument) does not exist
 //  - Any error returned by the command handler
 //
-// Any user error will be printed to Stderr by RunArgs, so callers don't need to print any
+// If args is nil, it will be set to os.Args[1:].
+//
+// Any user error will be printed to os.Stderr by RunOpts, so callers don't need to print any
 // error messages themselves.
 //
-// Note that RunArgs will panic in case of a programming error. This usually happens
+// Note that RunOpts will panic in case of a programming error. This usually happens
 // when Func or Options don't match the required constraints. See the documentation on
 // those fields in the Cmd type for more information.
-func RunArgs(args []string, commands []*Cmd) error {
+func RunOpts(args []string, opts *Options, commands []*Cmd) error {
+	if args == nil {
+		args = os.Args[1:]
+	}
+	optsFn, optsArgs, args, err := parseOptions(args, opts)
+	if err != nil {
+		return err
+	}
 	if len(args) == 0 || args[0] == "help" {
 		return printHelp(os.Stderr, args, commands)
 	}
 	name := args[0]
 	rem := args[1:]
 	cmd := commandByName(commands, name)
+	if optsFn.IsValid() {
+		if optsFn.Type().NumIn() > 1 {
+			optsArgs = append(optsArgs, reflect.ValueOf(cmd))
+		}
+		res := optsFn.Call(optsArgs)
+		if len(res) > 0 {
+			if e, ok := res[0].Interface().(error); ok {
+				fmt.Fprintf(os.Stderr, "%s\n", e)
+				return e
+			}
+		}
+	}
 	if cmd == nil {
 		return printHelp(os.Stderr, args, commands)
 	}
@@ -139,16 +180,15 @@ func RunArgs(args []string, commands []*Cmd) error {
 	if fn.Kind() != reflect.Func {
 		panic(fmt.Errorf("command handler %s is not a function, it's %T", name, cmd.Func))
 	}
+	if err := validateFuncReturn(fn); err != nil {
+		panic(fmt.Errorf("invalid handler for command %s: %s", name, err))
+	}
 	var optsVal reflect.Value
 	var fnArgs []reflect.Value
-	typ := fn.Type()
-	numIn := typ.NumIn()
+	var mandatory []reflect.Type
 	if cmd.Options != nil {
 		optsVal = reflect.ValueOf(cmd.Options)
-		optsType := optsVal.Type()
-		if numIn == 0 || (typ.In(0) != optsType && (numIn < 2 || typ.In(1) != optsType)) {
-			panic(fmt.Errorf("command %s (%s) declares options of type %T but does not accept them", name, typ, cmd.Options))
-		}
+		mandatory = append(mandatory, optsVal.Type())
 		flags, err := setupOptionsFlags(name, optsVal)
 		if err != nil {
 			panic(err)
@@ -158,6 +198,11 @@ func RunArgs(args []string, commands []*Cmd) error {
 		}
 		rem = flags.Args()
 	}
+	if err := validateFuncInput(fn, []reflect.Type{argsType}, mandatory, true); err != nil {
+		panic(fmt.Errorf("invalid handler for command %s: %s", name, err))
+	}
+	typ := fn.Type()
+	numIn := typ.NumIn()
 	if numIn > 0 && typ.In(0) == argsType {
 		fnArgs = append(fnArgs, reflect.ValueOf(rem))
 	} else if len(rem) > 0 {
@@ -177,6 +222,119 @@ func RunArgs(args []string, commands []*Cmd) error {
 	return nil
 }
 
+func parseOptions(args []string, opts *Options) (reflect.Value, []reflect.Value, []string, error) {
+	var optsFn reflect.Value
+	var optsArgs []reflect.Value
+	if opts != nil {
+		var globalOptsVal reflect.Value
+		var mandatory []reflect.Type
+		if opts.Options != nil {
+			globalOptsVal = reflect.ValueOf(opts.Options)
+			mandatory = append(mandatory, globalOptsVal.Type())
+			flags, err := setupOptionsFlags("", globalOptsVal)
+			if err != nil {
+				panic(err)
+			}
+			if err := flags.Parse(args); err != nil {
+				return optsFn, optsArgs, args, err
+			}
+			args = flags.Args()
+		}
+		if opts.Func != nil {
+			optsFn = reflect.ValueOf(opts.Func)
+			if optsFn.Kind() != reflect.Func {
+				panic(fmt.Errorf("options handler is not a function, it's %T", opts.Func))
+			}
+			if err := validateFuncReturn(optsFn); err != nil {
+				panic(fmt.Errorf("invalid options handler: %s", err))
+			}
+			if err := validateFuncInput(optsFn, []reflect.Type{cmdType}, mandatory, false); err != nil {
+				panic(fmt.Errorf("invalid options handler: %s", err))
+			}
+			if opts.Options != nil {
+				optsArgs = append(optsArgs, globalOptsVal)
+			}
+		}
+	}
+	return optsFn, optsArgs, args, nil
+}
+
+func validateArguments(val reflect.Value, n int, args []reflect.Type, mandatory bool) (int, error) {
+	typ := val.Type()
+	numIn := typ.NumIn()
+	for _, v := range args {
+		if n >= numIn {
+			if !mandatory {
+				break
+			}
+			return 0, fmt.Errorf("function %s must accept an argument of type %s as the #%d parameter, but in only has %d arguments", funcName(val), v, n+1, numIn)
+		}
+		in := typ.In(n)
+		if in != v {
+			if !mandatory {
+				continue
+			}
+			return 0, fmt.Errorf("function %s must accept an argument of type %s as the #%d parameter, not %s", funcName(val), v, n+1, in)
+		}
+		n++
+	}
+	return n, nil
+}
+
+func validateFuncInput(val reflect.Value, optional []reflect.Type, mandatory []reflect.Type, optionalFirst bool) error {
+	n := 0
+	var toCheck [][]reflect.Type
+	var mandatories []bool
+	if optionalFirst {
+		toCheck = [][]reflect.Type{optional, mandatory}
+		mandatories = []bool{false, true}
+	} else {
+		toCheck = [][]reflect.Type{mandatory, optional}
+		mandatories = []bool{true, false}
+	}
+	var err error
+	for ii, v := range toCheck {
+		n, err = validateArguments(val, n, v, mandatories[ii])
+		if err != nil {
+			return err
+		}
+	}
+	typ := val.Type()
+	numIn := typ.NumIn()
+	if n != numIn {
+		var remaining []string
+		for ii := n; ii < numIn; ii++ {
+			remaining = append(remaining, typ.In(ii).String())
+		}
+		return fmt.Errorf("function %s has %d unused arguments of types %s", funcName(val), numIn-n, strings.Join(remaining, ", "))
+	}
+	return nil
+}
+
+func validateFuncReturn(val reflect.Value) error {
+	typ := val.Type()
+	numOut := typ.NumOut()
+	if numOut == 0 {
+		return nil
+	}
+	if numOut > 1 {
+		return fmt.Errorf("function %s must return 0 or 1 arguments, not %d", funcName(val), numOut)
+	}
+	if typ.Out(0) != errType {
+		return fmt.Errorf("function %s must return a value of type %s, not %s", funcName(val), errType, typ.Out(0))
+	}
+	return nil
+}
+
+func funcName(val reflect.Value) string {
+	ptr := val.Pointer()
+	fn := runtime.FuncForPC(ptr)
+	if fn == nil {
+		return fmt.Sprintf("unknown function at %p", ptr)
+	}
+	return fn.Name()
+}
+
 func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 	if val.Kind() != reflect.Ptr {
 		return nil, fmt.Errorf("invalid options %s, must be a pointer", val.Type())
@@ -186,7 +344,13 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 	if typ.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("invalid Options type %s, must be an struct", typ)
 	}
-	flagsName := fmt.Sprintf("%s %s subcommand", filepath.Base(os.Args[0]), name)
+	arg0 := filepath.Base(os.Args[0])
+	var flagsName string
+	if name != "" {
+		flagsName = fmt.Sprintf("%s %s subcommand", arg0, name)
+	} else {
+		flagsName = arg0
+	}
 	flags := flag.NewFlagSet(flagsName, flag.ContinueOnError)
 	for ii := 0; ii < typ.NumField(); ii++ {
 		field := typ.Field(ii)
