@@ -148,6 +148,12 @@ type Options struct {
 // when Func or Options don't match the required constraints. See the documentation on
 // those fields in the Cmd type for more information.
 func RunOpts(args []string, opts *Options, commands []*Cmd) error {
+	if os.Getenv(CommandDumpHelpEnvVar) != "" {
+		if err := dumpHelp(os.Stdout, opts, commands); err != nil {
+			panic(err)
+		}
+		return nil
+	}
 	if args == nil {
 		args = os.Args[1:]
 	}
@@ -335,15 +341,7 @@ func funcName(val reflect.Value) string {
 	return fn.Name()
 }
 
-func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
-	if val.Kind() != reflect.Ptr {
-		return nil, fmt.Errorf("invalid options %s, must be a pointer", val.Type())
-	}
-	val = reflect.Indirect(val)
-	typ := val.Type()
-	if typ.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("invalid Options type %s, must be an struct", typ)
-	}
+func setupOptionsFlags(name string, sval reflect.Value) (*flag.FlagSet, error) {
 	arg0 := filepath.Base(os.Args[0])
 	var flagsName string
 	if name != "" {
@@ -352,45 +350,44 @@ func setupOptionsFlags(name string, val reflect.Value) (*flag.FlagSet, error) {
 		flagsName = arg0
 	}
 	flags := flag.NewFlagSet(flagsName, flag.ContinueOnError)
-	for ii := 0; ii < typ.NumField(); ii++ {
-		field := typ.Field(ii)
-		fieldVal := val.Field(ii)
-		ptr := fieldVal.Addr().Interface()
-		name := strings.ToLower(field.Name)
-		var help string
-		if n := field.Tag.Get("name"); n != "" {
-			name = n
-		}
-		if h := field.Tag.Get("help"); h != "" {
-			help = h
-		}
-		if name == "" {
-			return nil, fmt.Errorf("no name provided for field #%d in type %s", ii, typ)
-		}
+	err := visitStruct(sval, func(name string, help string, field *reflect.StructField, val reflect.Value, ptr interface{}) error {
 		if value, ok := ptr.(flag.Value); ok {
 			flags.Var(value, name, help)
-			continue
+			return nil
 		}
-		switch field.Type.Kind() {
+		switch val.Type().Kind() {
 		case reflect.Bool:
-			flags.BoolVar(ptr.(*bool), name, fieldVal.Bool(), help)
+			flags.BoolVar(ptr.(*bool), name, val.Bool(), help)
 		case reflect.Float64:
-			flags.Float64Var(ptr.(*float64), name, fieldVal.Float(), help)
+			flags.Float64Var(ptr.(*float64), name, val.Float(), help)
 		case reflect.Int:
-			flags.IntVar(ptr.(*int), name, int(fieldVal.Int()), help)
+			flags.IntVar(ptr.(*int), name, int(val.Int()), help)
 		case reflect.Uint:
-			flags.UintVar(ptr.(*uint), name, uint(fieldVal.Uint()), help)
+			flags.UintVar(ptr.(*uint), name, uint(val.Uint()), help)
 		case reflect.Int64:
-			flags.Int64Var(ptr.(*int64), name, fieldVal.Int(), help)
+			flags.Int64Var(ptr.(*int64), name, val.Int(), help)
 		case reflect.Uint64:
-			flags.Uint64Var(ptr.(*uint64), name, fieldVal.Uint(), help)
+			flags.Uint64Var(ptr.(*uint64), name, val.Uint(), help)
 		case reflect.String:
-			flags.StringVar(ptr.(*string), name, fieldVal.String(), help)
+			flags.StringVar(ptr.(*string), name, val.String(), help)
 		default:
-			return nil, fmt.Errorf("field %s has invalid option type %s", field.Name, field.Type)
+			return fmt.Errorf("field %s has invalid option type %s", field.Name, field.Type)
 		}
+		return nil
+	})
+	switch err {
+	case errNoPointer:
+		if name != "" {
+			return nil, fmt.Errorf("invalid command %s options %s, must be a pointer", name, sval.Type())
+		}
+		return nil, fmt.Errorf("invalid options %s, must be a pointer", sval.Type())
+	case errNoStruct:
+		if name != "" {
+			return nil, fmt.Errorf("command %s options field is not a struct, it's %T", name, sval.Type())
+		}
+		return nil, fmt.Errorf("options field is not a struct, it's %T", sval.Type())
 	}
-	return flags, nil
+	return flags, err
 }
 
 func commandByName(commands []*Cmd, name string) *Cmd {

@@ -17,3 +17,12 @@ Then use the following import path to ensure a stable API:
 
 For documentation and available versions,
 see http://gopkgs.com/command.
+
+See also the command tool, which can be used to automatically generate
+markdown documentation for a command. To install it, type:
+
+```
+    go install gopkgs.com/command.v1/cmd/command-tool
+```
+
+Then run ```command-tool help``` to view its help.
