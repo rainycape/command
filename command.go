@@ -33,7 +33,7 @@
 //  }
 //
 //  func main() {
-//	commands.Run(cmds)
+//	command.Exit(commands.Run(cmds))
 //  }
 package command
 
@@ -105,6 +105,25 @@ type Cmd struct {
 	//  - name: The name of the flag. If not present, it will default to the field name in lowercase.
 	//  - help: The short help shown the flag package for the given field.
 	Options interface{}
+}
+
+// Exit exits with exit status zero when err is nil and with
+// non-zero when err is non-nil.
+func Exit(err error) {
+	status := 0
+	switch err {
+	case ErrHelp:
+		status = 2
+	case ErrNoCommand:
+		status = 3
+	case ErrUnusedArguments:
+		status = 4
+	case nil:
+		// keep 0 status
+	default:
+		status = 1
+	}
+	os.Exit(status)
 }
 
 // Run is a shorthand for RunOpts(nil, nil, commands).
