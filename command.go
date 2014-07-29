@@ -166,7 +166,7 @@ type Options struct {
 // Note that RunOpts will panic in case of a programming error. This usually happens
 // when Func or Options don't match the required constraints. See the documentation on
 // those fields in the Cmd type for more information.
-func RunOpts(args []string, opts *Options, commands []*Cmd) error {
+func RunOpts(args []string, opts *Options, commands []*Cmd) (err error) {
 	if os.Getenv(CommandDumpHelpEnvVar) != "" {
 		if err := dumpHelp(os.Stdout, opts, commands); err != nil {
 			panic(err)
@@ -186,6 +186,7 @@ func RunOpts(args []string, opts *Options, commands []*Cmd) error {
 	name := args[0]
 	rem := args[1:]
 	cmd := commandByName(commands, name)
+	defer recoverRun(cmd, &err)
 	if optsFn.IsValid() {
 		if optsFn.Type().NumIn() > 1 {
 			optsArgs = append(optsArgs, reflect.ValueOf(cmd))
