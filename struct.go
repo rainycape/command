@@ -4,13 +4,30 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
 	errNoPointer = errors.New("not a pointer")
 	errNoStruct  = errors.New("not a struct")
 )
+
+func defaultFieldName(name string) string {
+	var runes []rune
+	for ii := 0; ii < len(name); {
+		c, s := utf8.DecodeRuneInString(name[ii:])
+		ii += s
+		if unicode.IsUpper(c) {
+			if len(runes) > 0 {
+				runes = append(runes, '-')
+			}
+			c = unicode.ToLower(c)
+		}
+		runes = append(runes, c)
+	}
+	return string(runes)
+}
 
 type structVisitor func(name string, help string, field *reflect.StructField, val reflect.Value, ptr interface{}) error
 
@@ -27,7 +44,7 @@ func visitStruct(val reflect.Value, visitor structVisitor) error {
 		field := typ.Field(ii)
 		fieldVal := val.Field(ii)
 		ptr := fieldVal.Addr().Interface()
-		name := strings.ToLower(field.Name)
+		name := defaultFieldName(field.Name)
 		var help string
 		if n := field.Tag.Get("name"); n != "" {
 			name = n
