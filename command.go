@@ -33,7 +33,7 @@
 //  }
 //
 //  func main() {
-//	command.Exit(commands.Run(cmds))
+//	command.Exit(command.Run(cmds))
 //  }
 package command
 
