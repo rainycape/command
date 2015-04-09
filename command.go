@@ -153,7 +153,7 @@ type Options struct {
 	// Func must be a function which accepts a value of the same
 	// type of Options as the first parameter and, optionally, a
 	// *Cmd as the second argument, which will be the command which is
-	// going the be run after calling Func.  Note that setting a non-nil
+	// going the be run after calling Func. Note that setting a non-nil
 	// Func with nil Options is supported, but in that case Func must
 	// take zero or one argument of type *Cmd. In any case, Func might return
 	// either zero or one value of type error.
