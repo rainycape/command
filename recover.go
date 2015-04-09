@@ -7,7 +7,18 @@ import (
 	"strings"
 )
 
+const (
+	// When this environment variable is non-empty, command won't
+	// recover from a panic during a command, producing the full
+	// stack trace. Useful for debugging problems with commands.
+	LetCommandPanic = "LET_COMMAND_PANIC"
+)
+
 func recoverRun(cmd *Cmd, err *error) {
+	if os.Getenv(LetCommandPanic) != "" {
+		// Let it panic and generate the full stack trace
+		return
+	}
 	if r := recover(); r != nil {
 		var file string
 		var line int
