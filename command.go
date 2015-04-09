@@ -218,12 +218,12 @@ func RunOpts(args []string, opts *Options, commands []*Cmd) (err error) {
 	if err := callOptionsFunc(optsBeforeFn, optsArgs, nil); err != nil {
 		return err
 	}
-	name := args[0]
-	rem := args[1:]
 	commands = append(commands, opts.additionalCommands()...)
 	if len(args) == 0 || args[0] == "help" {
 		return printHelp(os.Stderr, args, commands)
 	}
+	name := args[0]
+	rem := args[1:]
 	cmd := commandByName(commands, name)
 	if cmd == nil {
 		return printHelp(os.Stderr, args, commands)
