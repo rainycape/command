@@ -11,7 +11,7 @@
 //  package main
 //
 //  import (
-//	"gopkgs.com/command.v1"
+//	"github.com/rainycape/command"
 //  )
 //
 //  var (
